@@ -168,6 +168,7 @@ const engine = new Engine(GODOT_CONFIG);
 	});
 
 	if (missing.length !== 0) {
+		// 终极修复版：sessionStorage存锁 + 彻底阻断刷新循环
 		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
 			// 1. 核心修复：用sessionStorage存锁，跨刷新不丢失
 			const SW_LOCK_KEY = 'godot_sw_initiated';
@@ -217,7 +218,8 @@ const engine = new Engine(GODOT_CONFIG);
 			// Display the message as usual
 			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
 			displayFailureNotice(missingMsg + missing.join('\n'));
-		} else {
+		}
+	} else {
 		setStatusMode('progress');
 		engine.startGame({
 			'onProgress': function (current, total) {
@@ -237,3 +239,4 @@ const engine = new Engine(GODOT_CONFIG);
 		</script>
 	</body>
 </html>
+
