@@ -169,30 +169,45 @@ const engine = new Engine(GODOT_CONFIG);
 
 	if (missing.length !== 0) {
 		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-			let serviceWorkerRegistrationPromise;
-			try {
-				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-			} catch (err) {
-				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-			}
-			// There's a chance that installing the service worker would fix the issue
-			Promise.race([
-				serviceWorkerRegistrationPromise.then((registration) => {
-					if (registration != null) {
-						return Promise.reject(new Error('Service worker already exists.'));
-					}
-					return registration;
-				}).then(() => engine.installServiceWorker()),
-				// For some reason, `getRegistration()` can stall
-				new Promise((resolve) => {
-					setTimeout(() => resolve(), 2000);
-				}),
-			]).then(() => {
-				// Reload if there was no error.
-				window.location.reload();
-			}).catch((err) => {
-				console.error('Error while registering service worker:', err);
-			});
+			// 1. 全局锁：确保注册逻辑仅执行一次，杜绝重复调用
+		    if (window._swInitiated) return;
+		    window._swInitiated = true;
+		
+		    let serviceWorkerRegistrationPromise;
+		    try {
+		        // 获取已注册的SW（默认作用域）
+		        serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
+		    } catch (err) {
+		        serviceWorkerRegistrationPromise = Promise.reject(new Error('SW获取失败: ' + err.message));
+		    }
+		
+		    Promise.race([
+		        serviceWorkerRegistrationPromise.then((registration) => {
+		            // 2. 已有SW：直接复用，不注册、不刷新
+		            if (registration != null) {
+		                console.log('SW已存在，复用现有实例:', registration.scope);
+		                return registration;
+		            }
+		            // 3. 无SW：执行安装（保留SW功能，解决跨域问题）
+		            console.log('无SW实例，执行注册');
+		            return engine.installServiceWorker();
+		        }),
+		        // 2秒超时兜底（仅终止等待，不触发刷新）
+		        new Promise((resolve) => setTimeout(resolve, 2000))
+		    ]).then((registration) => {
+		        // 4. 仅当“新安装SW（处于installing状态）”时才刷新，其余情况不刷新
+		        if (registration && registration.installing) {
+		            console.log('新SW安装成功，刷新页面生效');
+		            window.location.reload();
+		        } else {
+		            console.log('无需刷新（已有SW/注册超时）');
+		        }
+		    }).catch((err) => {
+		        // 5. 注册失败：仅打印错误，不刷新、不重试
+		        console.error('SW注册失败（不影响页面运行）:', err);
+		        // 标记为已执行，避免循环
+		        window._swInitiated = true;
+		    });
 		} else {
 			// Display the message as usual
 			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
