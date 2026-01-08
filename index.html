@@ -169,53 +169,55 @@ const engine = new Engine(GODOT_CONFIG);
 
 	if (missing.length !== 0) {
 		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-			// 修复1：全局锁挂载到window.top（避免iframe嵌套导致锁失效）
-			if (window.top._swInitiated) {
-				console.log('全局锁生效，跳过SW注册');
-				return;
+			// 1. 核心修复：用sessionStorage存锁，跨刷新不丢失
+			const SW_LOCK_KEY = 'godot_sw_initiated';
+			if (sessionStorage.getItem(SW_LOCK_KEY) === 'true') {
+				console.log('[SW锁生效] 已执行过注册逻辑，直接跳过');
+				return; // 彻底终止，不执行后续任何代码
 			}
-			window.top._swInitiated = true; // 挂载到顶层window，iframe也能共享锁
-			
+			// 标记为已执行（一旦标记，会话内不再执行）
+			sessionStorage.setItem(SW_LOCK_KEY, 'true');
+			console.log('[SW锁] 首次执行，标记已初始化');
+
 			let serviceWorkerRegistrationPromise;
 			try {
 				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
 			} catch (err) {
 				serviceWorkerRegistrationPromise = Promise.reject(new Error('SW获取失败: ' + err.message));
 			}
-			
+
 			Promise.race([
 				serviceWorkerRegistrationPromise.then((registration) => {
 					if (registration != null) {
-						console.log('SW已存在，直接返回，不刷新');
+						console.log('[SW状态] 已有活跃SW，无需注册，不刷新');
 						return registration;
 					}
-					console.log('无SW，执行注册');
+					console.log('[SW状态] 无活跃SW，执行注册');
 					return engine.installServiceWorker();
 				}),
 				new Promise((resolve) => setTimeout(resolve, 2000))
 			]).then((registration) => {
-				// 修复2：极端严格的刷新判断（仅当有installing状态且是新注册时才刷新）
-				const needReload = registration && registration.installing && !registration.active;
-				if (needReload) {
-					console.log('仅新SW安装中，刷新1次');
-					// 修复3：加延迟+标记，避免重复刷新
-					if (!window.top._swReloaded) {
-						window.top._swReloaded = true;
-						setTimeout(() => window.location.reload(), 1000); // 延迟1秒，让SW安装完成
-					}
+				// 2. 极端严格：仅当「新SW正在安装」且「无活跃SW」时，才允许刷新1次
+				const isNewSWInstalling = registration && registration.installing && !registration.active;
+				if (isNewSWInstalling) {
+					console.log('[SW刷新] 仅新SW安装中，刷新1次（最后1次）');
+					// 加双重保险：标记已刷新，避免重复刷新
+					sessionStorage.setItem('godot_sw_reloaded', 'true');
+					// 延迟刷新，让SW安装完成，避免刷新后又触发
+					setTimeout(() => window.location.reload(), 1500);
 				} else {
-					console.log('无需刷新（已有SW/无新安装）');
+					console.log('[SW刷新] 无需刷新（已有SW/注册超时）');
 				}
 			}).catch((err) => {
-				console.error('SW注册失败，不刷新:', err);
-				window.top._swInitiated = true; // 失败也标记，避免循环
+				console.error('[SW错误] 注册失败，彻底终止，不刷新:', err);
+				// 失败也标记锁，避免循环
+				sessionStorage.setItem(SW_LOCK_KEY, 'true');
 			});
 		} else {
 			// Display the message as usual
 			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
 			displayFailureNotice(missingMsg + missing.join('\n'));
-		}
-	} else {
+		} else {
 		setStatusMode('progress');
 		engine.startGame({
 			'onProgress': function (current, total) {
