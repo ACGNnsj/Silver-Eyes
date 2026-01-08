@@ -169,17 +169,8 @@ const engine = new Engine(GODOT_CONFIG);
 
 	if (missing.length !== 0) {
 		// 终极修复版：sessionStorage存锁 + 彻底阻断刷新循环
+		// 纯净化版：无任何锁，只解决刷新+SW安装问题
 		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-			// 1. 核心修复：用sessionStorage存锁，跨刷新不丢失
-			const SW_LOCK_KEY = 'godot_sw_initiated';
-			if (sessionStorage.getItem(SW_LOCK_KEY) === 'true') {
-				console.log('[SW锁生效] 已执行过注册逻辑，直接跳过');
-				return; // 彻底终止，不执行后续任何代码
-			}
-			// 标记为已执行（一旦标记，会话内不再执行）
-			sessionStorage.setItem(SW_LOCK_KEY, 'true');
-			console.log('[SW锁] 首次执行，标记已初始化');
-
 			let serviceWorkerRegistrationPromise;
 			try {
 				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
@@ -189,30 +180,25 @@ const engine = new Engine(GODOT_CONFIG);
 
 			Promise.race([
 				serviceWorkerRegistrationPromise.then((registration) => {
+					// 已有SW：直接返回，不注册、不刷新
 					if (registration != null) {
-						console.log('[SW状态] 已有活跃SW，无需注册，不刷新');
+						console.log('SW已存在，复用现有实例');
 						return registration;
 					}
-					console.log('[SW状态] 无活跃SW，执行注册');
+					// 无SW：执行注册（仅1次）
+					console.log('无SW实例，执行注册');
 					return engine.installServiceWorker();
 				}),
-				new Promise((resolve) => setTimeout(resolve, 2000))
+				new Promise((resolve) => setTimeout(resolve, 2000)) // 2秒超时兜底
 			]).then((registration) => {
-				// 2. 极端严格：仅当「新SW正在安装」且「无活跃SW」时，才允许刷新1次
-				const isNewSWInstalling = registration && registration.installing && !registration.active;
-				if (isNewSWInstalling) {
-					console.log('[SW刷新] 仅新SW安装中，刷新1次（最后1次）');
-					// 加双重保险：标记已刷新，避免重复刷新
-					sessionStorage.setItem('godot_sw_reloaded', 'true');
-					// 延迟刷新，让SW安装完成，避免刷新后又触发
+				// 仅当「新SW正在安装」时，刷新1次（绝不循环）
+				const needReload = registration && registration.installing && !registration.active;
+				if (needReload) {
+					console.log('新SW安装中，仅刷新1次');
 					setTimeout(() => window.location.reload(), 1500);
-				} else {
-					console.log('[SW刷新] 无需刷新（已有SW/注册超时）');
 				}
 			}).catch((err) => {
-				console.error('[SW错误] 注册失败，彻底终止，不刷新:', err);
-				// 失败也标记锁，避免循环
-				sessionStorage.setItem(SW_LOCK_KEY, 'true');
+				console.error('SW注册失败，不刷新:', err);
 			});
 		} else {
 			// Display the message as usual
