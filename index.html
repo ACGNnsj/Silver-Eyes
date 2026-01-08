@@ -175,22 +175,21 @@ const engine = new Engine(GODOT_CONFIG);
 			} catch (err) {
 				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
 			}
+			// There's a chance that installing the service worker would fix the issue
 			Promise.race([
 				serviceWorkerRegistrationPromise.then((registration) => {
 					if (registration != null) {
-						// 关键修改2：已存在时不报错，直接resolve，避免reject
-						console.log('Service worker already exists, reuse it.');
-						return registration;
+						return Promise.reject(new Error('Service worker already exists.'));
 					}
-					return engine.installServiceWorker();
-				}),
+					return registration;
+				}).then(() => engine.installServiceWorker()),
+				// For some reason, `getRegistration()` can stall
 				new Promise((resolve) => {
 					setTimeout(() => resolve(), 2000);
 				}),
 			]).then(() => {
-				// 关键修改4：删除自动刷新，避免iframe刷新干扰
-				// window.location.reload();
-				console.log('Service worker ready, no reload needed.');
+				// Reload if there was no error.
+				window.location.reload();
 			}).catch((err) => {
 				console.error('Error while registering service worker:', err);
 			});
