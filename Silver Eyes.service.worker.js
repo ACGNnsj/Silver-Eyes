@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1767853798|743697700';
+const CACHE_VERSION = '1767873155|2239055634';
 /** @type {string} */
 const CACHE_PREFIX = 'Silver Eyes-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
@@ -20,8 +20,24 @@ const CACHED_FILES = ["Silver Eyes.html","Silver Eyes.js","Silver Eyes.offline.h
 const CACHEABLE_FILES = ["Silver Eyes.wasm","Silver Eyes.pck","Silver Eyes.side.wasm"];
 const FULL_CACHE = CACHED_FILES.concat(CACHEABLE_FILES);
 
+// 👇 核心修改1：重构install事件，单个缓存文件，失败跳过，确保install必完成
 self.addEventListener('install', (event) => {
-	event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CACHED_FILES)));
+	self.skipWaiting(); // 强制激活新SW，避免旧SW阻塞
+	event.waitUntil(
+		(async () => {
+			const cache = await caches.open(CACHE_NAME);
+			// 把cache.addAll改成逐个缓存，失败跳过，不阻塞整体
+			for (const file of CACHED_FILES) {
+				try {
+					await cache.add(file);
+					console.log(`SW缓存成功: ${file}`);
+				} catch (err) {
+					console.warn(`SW缓存失败（跳过）: ${file}`, err);
+				}
+			}
+			console.log('SW安装完成（部分文件缓存失败已跳过）');
+		})()
+	);
 });
 
 self.addEventListener('activate', (event) => {
@@ -163,4 +179,3 @@ self.addEventListener('message', (event) => {
 		}
 	});
 });
-

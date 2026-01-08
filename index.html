@@ -112,7 +112,7 @@ body {
 
 		<script src="Silver Eyes.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"Silver Eyes","experimentalVK":false,"fileSizes":{"Silver Eyes.pck":57751616,"Silver Eyes.wasm":1656762},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"Silver Eyes.service.worker.js"};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"Silver Eyes","experimentalVK":false,"fileSizes":{"Silver Eyes.pck":57892140,"Silver Eyes.wasm":1656762},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"Silver Eyes.service.worker.js"};
 const GODOT_THREADS_ENABLED = true;
 const engine = new Engine(GODOT_CONFIG);
 
@@ -173,25 +173,34 @@ const engine = new Engine(GODOT_CONFIG);
 			try {
 				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
 			} catch (err) {
-				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
+				serviceWorkerRegistrationPromise = Promise.reject(err);
 			}
-			// There's a chance that installing the service worker would fix the issue
+
 			Promise.race([
 				serviceWorkerRegistrationPromise.then((registration) => {
 					if (registration != null) {
-						return Promise.reject(new Error('Service worker already exists.'));
+						console.log('SW已存在，复用');
+						return registration;
 					}
-					return registration;
-				}).then(() => engine.installServiceWorker()),
-				// For some reason, `getRegistration()` can stall
-				new Promise((resolve) => {
-					setTimeout(() => resolve(), 2000);
+					console.log('无SW，执行注册');
+					// 捕获安装失败，返回null阻断刷新
+					return engine.installServiceWorker().catch((err) => {
+						console.error('SW安装失败（部分文件缓存失败）:', err);
+						return null;
+					});
 				}),
-			]).then(() => {
-				// Reload if there was no error.
-				window.location.reload();
+				new Promise((resolve) => setTimeout(resolve, 2000))
+			]).then((registration) => {
+				// 仅当注册成功且新SW在安装时，才刷新1次
+				const needReload = registration && registration.installing && !registration.active;
+				if (needReload) {
+					console.log('新SW安装成功，仅刷新1次');
+					setTimeout(() => window.location.reload(), 1500);
+				} else {
+					console.log('无需刷新（SW已存在/安装失败）');
+				}
 			}).catch((err) => {
-				console.error('Error while registering service worker:', err);
+				console.error('SW注册流程出错，不刷新:', err);
 			});
 		} else {
 			// Display the message as usual
