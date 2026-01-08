@@ -175,30 +175,34 @@ const engine = new Engine(GODOT_CONFIG);
 			try {
 				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
 			} catch (err) {
-				serviceWorkerRegistrationPromise = Promise.reject(new Error('SW获取失败: ' + err.message));
+				serviceWorkerRegistrationPromise = Promise.reject(err);
 			}
 
 			Promise.race([
 				serviceWorkerRegistrationPromise.then((registration) => {
-					// 已有SW：直接返回，不注册、不刷新
 					if (registration != null) {
-						console.log('SW已存在，复用现有实例');
+						console.log('SW已存在，复用');
 						return registration;
 					}
-					// 无SW：执行注册（仅1次）
-					console.log('无SW实例，执行注册');
-					return engine.installServiceWorker();
+					console.log('无SW，执行注册');
+					// 捕获安装失败，返回null阻断刷新
+					return engine.installServiceWorker().catch((err) => {
+						console.error('SW安装失败（部分文件缓存失败）:', err);
+						return null;
+					});
 				}),
-				new Promise((resolve) => setTimeout(resolve, 2000)) // 2秒超时兜底
+				new Promise((resolve) => setTimeout(resolve, 2000))
 			]).then((registration) => {
-				// 仅当「新SW正在安装」时，刷新1次（绝不循环）
+				// 仅当注册成功且新SW在安装时，才刷新1次
 				const needReload = registration && registration.installing && !registration.active;
 				if (needReload) {
-					console.log('新SW安装中，仅刷新1次');
+					console.log('新SW安装成功，仅刷新1次');
 					setTimeout(() => window.location.reload(), 1500);
+				} else {
+					console.log('无需刷新（SW已存在/安装失败）');
 				}
 			}).catch((err) => {
-				console.error('SW注册失败，不刷新:', err);
+				console.error('SW注册流程出错，不刷新:', err);
 			});
 		} else {
 			// Display the message as usual
